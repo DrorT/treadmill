@@ -1,0 +1,17 @@
+import { DatabaseSync } from 'node:sqlite';
+import { mkdirSync } from 'node:fs';
+import { join } from 'node:path';
+import { dataDir } from './config.mjs';
+mkdirSync(dataDir, {recursive:true});
+export const db = new DatabaseSync(join(dataDir,'dashboard.sqlite'));
+db.exec(`PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;
+CREATE TABLE IF NOT EXISTS machines(id TEXT PRIMARY KEY,label TEXT,consoleSerial TEXT,dbGeneration INTEGER NOT NULL DEFAULT 1,createdAt TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS workouts(id INTEGER PRIMARY KEY,machineId TEXT NOT NULL,dbGeneration INTEGER NOT NULL,recordId INTEGER NOT NULL,userId INTEGER,mode INTEGER,distanceRaw REAL,distanceKm REAL,unitProvenance TEXT,caloriesKcal REAL,durationMs INTEGER,createdUnixMs INTEGER,importedAt TEXT,UNIQUE(machineId,dbGeneration,recordId));
+CREATE TABLE IF NOT EXISTS live_sessions(id TEXT PRIMARY KEY,machineId TEXT,startedAt TEXT,endedAt TEXT,state TEXT,linkedWorkoutId INTEGER,source TEXT);
+CREATE TABLE IF NOT EXISTS samples(id INTEGER PRIMARY KEY,liveSessionId TEXT,connectionEpoch TEXT,sequence INTEGER,sampledAt TEXT,receivedAt TEXT,state TEXT,speedKph REAL,inclinePercent REAL,elapsedSeconds REAL,distanceKm REAL,caloriesKcal REAL,pulseBpm REAL,qualityJson TEXT,UNIQUE(connectionEpoch,sequence));
+CREATE TABLE IF NOT EXISTS commands(id TEXT PRIMARY KEY,machineId TEXT,requestId TEXT UNIQUE,actionJson TEXT,state TEXT,requestedAt TEXT,sentAt TEXT,completedAt TEXT,resultJson TEXT);
+CREATE TABLE IF NOT EXISTS sync_state(machineId TEXT,dbGeneration INTEGER,lastRecordId INTEGER,lastSyncAt TEXT,identity TEXT,PRIMARY KEY(machineId,dbGeneration));`);
+if(!db.prepare('PRAGMA table_info(sync_state)').all().some(c=>c.name==='identity'))db.exec('ALTER TABLE sync_state ADD COLUMN identity TEXT');
+export function getMachine(id){let m=db.prepare('SELECT * FROM machines WHERE id=?').get(id);if(!m){const serial=id.startsWith('g700x-')?id.slice(6):null;db.prepare('INSERT INTO machines VALUES(?,?,?,1,?)').run(id,'Treadmill',serial,new Date().toISOString());m=db.prepare('SELECT * FROM machines WHERE id=?').get(id);}return m;}
+export function saveSample(sessionId,s){db.prepare(`INSERT OR IGNORE INTO samples(liveSessionId,connectionEpoch,sequence,sampledAt,receivedAt,state,speedKph,inclinePercent,elapsedSeconds,distanceKm,caloriesKcal,pulseBpm,qualityJson) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(sessionId,s.connectionEpoch,s.sequence,s.sampledAt,s.receivedAt,s.state,s.speedKph,s.inclinePercent,s.elapsedSeconds,s.distanceKm,s.caloriesKcal,s.pulseBpm,JSON.stringify(s.quality));}
+export function importWorkouts(machineId, records, generation=getMachine(machineId).dbGeneration){const tx=db.prepare(`INSERT INTO workouts(machineId,dbGeneration,recordId,userId,mode,distanceRaw,distanceKm,unitProvenance,caloriesKcal,durationMs,createdUnixMs,importedAt) VALUES(?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(machineId,dbGeneration,recordId) DO UPDATE SET userId=excluded.userId,mode=excluded.mode,distanceRaw=excluded.distanceRaw,caloriesKcal=excluded.caloriesKcal,durationMs=excluded.durationMs,createdUnixMs=excluded.createdUnixMs`);db.exec('BEGIN');try{db.prepare('UPDATE machines SET dbGeneration=? WHERE id=?').run(generation,machineId);for(const r of records)tx.run(machineId,generation,r.recordId,r.userId,r.mode,r.distance,null,'current-console-assumed',r.calories,r.duration,r.created,new Date().toISOString());db.exec('COMMIT');}catch(e){db.exec('ROLLBACK');throw e;}return records.length;}

@@ -1,0 +1,7 @@
+{
+  "host": "127.0.0.1",
+  "port": 8080,
+  "adbPath": "C:\\Program Files\\ASUS\\GlideX\\adb.exe",
+  "deviceAddress": "",
+  "transport": "adb-jdwp"
+}
