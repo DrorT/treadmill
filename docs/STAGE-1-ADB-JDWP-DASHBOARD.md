@@ -14,13 +14,13 @@ Building software does not authorize unattended physical tests. Leave movement c
 
 Paths are relative to repository root, one directory above `docs/`:
 
-1. `TREADMILL-INTEGRATION-GUIDE.md` — full evidence; later reset experiments supersede earlier hypotheses.
-2. `jdwp-read.mjs` — working JDWP binary client, readers, runtime ID sizes.
-3. `poll-live.mjs` — exact live field/enum/service lookup, including pulse.
-4. `direct-setting-command.mjs` — working safe invocation breakpoint and setters.
-5. `decode-serial.mjs` — validated incoming packet decoder.
-6. `snapshot-history.sh` — bounded database snapshot helper, written but not hardware-tested.
-7. `isolated-start-stop-reset.sh` and corresponding captures — reset evidence, not a production scheduler.
+1. `docs/TREADMILL-INTEGRATION-GUIDE.md` — full evidence; later reset experiments supersede earlier hypotheses.
+2. `investigation/scripts/jdwp-read.mjs` — working JDWP binary client, readers, runtime ID sizes.
+3. `investigation/scripts/poll-live.mjs` — exact live field/enum/service lookup, including pulse.
+4. `investigation/scripts/direct-setting-command.mjs` — working safe invocation breakpoint and setters.
+5. `investigation/scripts/decode-serial.mjs` — validated incoming packet decoder.
+6. `investigation/scripts/snapshot-history.sh` — bounded database snapshot helper, written but not hardware-tested.
+7. `investigation/scripts/isolated-start-stop-reset.sh` and corresponding captures — reset evidence, not a production scheduler.
 
 Do not modify/delete original APKs, captures, database snapshots, or investigation evidence. Refactor/copy reusable logic into the new app; retain attribution in comments. Older chronological notes say capabilities were unknown at that time; they are not current limitations.
 
@@ -61,7 +61,7 @@ dashboard/
       invoke-setting.mjs
     device/
       stop-watchdog.sh
-      snapshot-history.sh
+      investigation/scripts/snapshot-history.sh
   public/
     index.html
     styles.css
@@ -192,7 +192,7 @@ Telemetry lookup:
 
 ### Speed/incline through app methods
 
-Reuse the JDWP invocation pattern from `direct-setting-command.mjs`; dashboard-only state and range guards are documented below. Main-thread one-shot Handler.dispatchMessage entry breakpoint, EventRequest.Set 15:1, event kind 2, event-thread suspension policy 1. Modifier order **ThreadOnly, LocationOnly, Count(1)**. Await Composite Event 64:100; recheck that the treadmill remains in the same Running or Paused metric state observed before invocation. Invoke `AbsRunnerService.setSpeed(I)V` (tenths) or `setIncline(I)V` with ObjectReference.InvokeMethod 9:6, option 1 (single-threaded). Check exception, ThreadReference.Resume 11:3 in finally, and cleanup events. Do not VM-suspend, field-write, or leave main thread suspended. At 30 seconds without event fail/detach; optional activity dumpsys can queue a main-thread message. Never use screen taps as an invocation fallback.
+Reuse the JDWP invocation pattern from `investigation/scripts/direct-setting-command.mjs`; dashboard-only state and range guards are documented below. Main-thread one-shot Handler.dispatchMessage entry breakpoint, EventRequest.Set 15:1, event kind 2, event-thread suspension policy 1. Modifier order **ThreadOnly, LocationOnly, Count(1)**. Await Composite Event 64:100; recheck that the treadmill remains in the same Running or Paused metric state observed before invocation. Invoke `AbsRunnerService.setSpeed(I)V` (tenths) or `setIncline(I)V` with ObjectReference.InvokeMethod 9:6, option 1 (single-threaded). Check exception, ThreadReference.Resume 11:3 in finally, and cleanup events. Do not VM-suspend, field-write, or leave main thread suspended. At 30 seconds without event fail/detach; optional activity dumpsys can queue a main-thread message. Never use screen taps as an invocation fallback.
 
 Confirmation: fresh controller-derived app readbacks at desired value and unchanged other setting, same Running or Paused state, two consecutive samples. Paused counters must remain stable; Running counters may advance but must not regress. Timeout 10 seconds after invocation → unknown with last observed state.
 
@@ -252,7 +252,7 @@ Create device watchdog script with fixed allowlisted files and validated numeric
 
 Console DB `/data/user/0/com.bodi.treadmill/databases/treadmill`, plus WAL/SHM. `records` columns: recordId, userId, mode, distance, calories, duration, created. Duration ms; created Unix ms **finish/creation time**, device-clock-dependent. Mode: 0 Manual,1 Time,2 Distance,3 Calorie,4 Program,5 User,6 Hrc,-1 UnKnown. Historical units not recorded; retain raw distance and set unit provenance to current-console-assumed, not proven for all history.
 
-Import existing `workout-history-raw.json` only through explicit demo/import option. Normal Sync retrieves a new snapshot. While Normal/Paused, use bounded DB/WAL snapshot helper; original helper only documented Paused, so carefully extend its UI guard to Normal as a new implementation condition. Snapshot code is unexecuted evidence: label real validation status until exercised. Do not suspend app while Running or Ready to sync. If busy, defer sync visibly. Preserve DB/WAL together and use unique local destinations; do not combine old/new WAL. Prefer SQLite backup via vendor process in Stage 2.
+Import existing `investigation/history/workout-history-raw.json` only through explicit demo/import option. Normal Sync retrieves a new snapshot. While Normal/Paused, use bounded DB/WAL snapshot helper; original helper only documented Paused, so carefully extend its UI guard to Normal as a new implementation condition. Snapshot code is unexecuted evidence: label real validation status until exercised. Do not suspend app while Running or Ready to sync. If busy, defer sync visibly. Preserve DB/WAL together and use unique local destinations; do not combine old/new WAL. Prefer SQLite backup via vendor process in Stage 2.
 
 Root shell is available; no `run-as` assumption. Exclude users/passwords from imports/API/logging. Never clear app storage, edit treadmill DB, force-stop vendor app, or delete history. Snapshot copying assumes the vendor process is sole writer and copying is inside bounded suspension; fail if copying exceeds the restoration deadline, do not import a questionable copy as complete.
 

@@ -64,7 +64,7 @@ $appPid = (& $adb -s $device shell -T pidof com.bodi.treadmill).Trim()
 if ($appPid -notmatch '^\d+$') { throw 'Expected one running treadmill app process' }
 & $adb -s $device jdwp
 & $adb -s $device forward tcp:8700 "jdwp:$appPid"
-node poll-live.mjs 1 connection-check.jsonl
+node investigation/scripts/poll-live.mjs 1 connection-check.jsonl
 ```
 
 The historical PID was 1218. Resolve it again after app/device restart. Port **8700 is a laptop-local forwarding port**, not the treadmill's wireless debugging port. Bindings/objects obtained through JDWP must be resolved again after restarting the app. Use one JDWP client at a time: stop a live reader before starting a setter or buffer inspector. Concurrent debugger connections can wait for the existing client to detach.
@@ -77,11 +77,11 @@ Telemetry initialization occasionally took tens of seconds, and a JDWP request t
 
 ```powershell
 # Complete the connection and forwarding steps above first.
-node poll-live.mjs 60 live-capture.jsonl
-Get-Content live-telemetry-latest.json
+node investigation/scripts/poll-live.mjs 60 live-capture.jsonl
+Get-Content investigation/telemetry/live-telemetry-latest.json
 ```
 
-The duration argument accepts 1–900 seconds. The script appends JSON Lines to the selected file and overwrites `live-telemetry-latest.json` with the latest sample. Choose a new capture filename when separate sessions should remain separate. Polling is approximately once per second; the console/controller itself exchanges data about five times per second.
+The duration argument accepts 1–900 seconds. The script appends JSON Lines to the selected file and overwrites `investigation/telemetry/live-telemetry-latest.json` with the latest sample. Choose a new capture filename when separate sessions should remain separate. Polling is approximately once per second; the console/controller itself exchanges data about five times per second.
 
 Example actual sample:
 
@@ -139,13 +139,13 @@ The app also has `UnKnown`. A start was observed as Paused → Ready → Running
 
 ### Read controller reply bytes
 
-`node inspect-serial-buffers.mjs` reads the app's receive buffer and exports `serial-buffer-snapshot.json` and `serial-app-buffer.bin`. It also exports a validated idle poll as `serial-poll.bin`, refusing to replay pending setting/key bytes. This buffer inspection may miss transient frames and is not a continuous UART capture.
+`node investigation/scripts/inspect-serial-buffers.mjs` reads the app's receive buffer and exports `investigation/serial/serial-buffer-snapshot.json` and `investigation/serial/serial-app-buffer.bin`. It also exports a validated idle poll as `investigation/serial/serial-poll.bin`, refusing to replay pending setting/key bytes. This buffer inspection may miss transient frames and is not a continuous UART capture.
 
 For a bounded independent capture **while paused**:
 
 ```powershell
-.\standalone-serial-probe.ps1 -Device $device -Adb $adb
-node decode-serial.mjs serial-standalone-capture.bin independent-decoded.json
+.\investigation/scripts/standalone-serial-probe.ps1 -Device $device -Adb $adb
+node investigation/scripts/decode-serial.mjs serial/serial-standalone-capture.bin serial/independent-decoded.json
 ```
 
 The wrapper discovers the PID, checks Paused, validates an idle poll, uploads it, suspends the app about 2.5 seconds, sends ten polls, captures bytes, restores the app, and verifies unchanged counters/settings. A cleanup trap and four-second watchdog restore the app. The test captured 13 valid frames / 208 bytes without checksum failures.
@@ -154,7 +154,7 @@ The wrapper discovers the PID, checks Paused, validates an idle poll, uploads it
 
 Database directory: `/data/user/0/com.bodi.treadmill/databases/`.
 
-Files: `treadmill` (SQLite), `treadmill-wal`, `treadmill-shm`. The existing local snapshot is `console-databases/`. The original extraction contained **552 records**, exported to `workout-history-raw.json` and `workout-history.csv`.
+Files: `treadmill` (SQLite), `treadmill-wal`, `treadmill-shm`. The existing local snapshot is `investigation/history/console-databases/`. The original extraction contained **552 records**, exported to `investigation/history/workout-history-raw.json` and `investigation/history/workout-history.csv`.
 
 ### Pull a snapshot
 
@@ -162,18 +162,18 @@ Files: `treadmill` (SQLite), `treadmill-wal`, `treadmill-shm`. The existing loca
 & $adb -s $device pull /data/user/0/com.bodi.treadmill/databases ./console-databases
 ```
 
-Keep the database and WAL together; pulling only `treadmill` can omit recent records. A directory pull while the app writes is not a guaranteed consistent snapshot. For repeatable sync, acquire a SQLite backup inside the console, or copy DB/WAL while writes are briefly quiesced and then restore the app. Perform the latter only while paused, using the bounded restoration pattern in `standalone-serial-probe.sh`. Do not use Android **Clear storage**: it removes app data.
+Keep the database and WAL together; pulling only `treadmill` can omit recent records. A directory pull while the app writes is not a guaranteed consistent snapshot. For repeatable sync, acquire a SQLite backup inside the console, or copy DB/WAL while writes are briefly quiesced and then restore the app. Perform the latter only while paused, using the bounded restoration pattern in `investigation/scripts/standalone-serial-probe.sh`. Do not use Android **Clear storage**: it removes app data.
 
-The supplied `snapshot-history.sh` implements a brief app suspension, copies DB/WAL/SHM to a unique console directory, then restores the app with a trap and four-second watchdog. Use it as follows after establishing current JDWP forwarding:
+The supplied `investigation/scripts/snapshot-history.sh` implements a brief app suspension, copies DB/WAL/SHM to a unique console directory, then restores the app with a trap and four-second watchdog. Use it as follows after establishing current JDWP forwarding:
 
 ```powershell
-node poll-live.mjs 1 before-history-snapshot.jsonl
+node investigation/scripts/poll-live.mjs 1 before-history-snapshot.jsonl
 if ($LASTEXITCODE -ne 0) { throw 'Telemetry read failed' }
-$state = Get-Content live-telemetry-latest.json -Raw | ConvertFrom-Json
+$state = Get-Content investigation/telemetry/live-telemetry-latest.json -Raw | ConvertFrom-Json
 if ($state.state -ne 'Paused' -or $state.statusRaw -ne 7) {
   throw 'History snapshot requires a paused treadmill'
 }
-& $adb -s $device push snapshot-history.sh /data/local/tmp/snapshot-history.sh
+& $adb -s $device push investigation/scripts/snapshot-history.sh /data/local/tmp/snapshot-history.sh
 if ($LASTEXITCODE -ne 0) { throw 'Snapshot script upload failed' }
 $snapshotPath = (& $adb -s $device shell -T sh /data/local/tmp/snapshot-history.sh).Trim()
 if ($LASTEXITCODE -ne 0 -or $snapshotPath -notmatch '^/data/local/tmp/treadmill-history\.[A-Za-z0-9]+$') {
@@ -182,7 +182,7 @@ if ($LASTEXITCODE -ne 0 -or $snapshotPath -notmatch '^/data/local/tmp/treadmill-
 # Use a new local destination to avoid combining files from different snapshots.
 $snapshotLocal = Join-Path $PWD ('history-' + (Get-Date -Format 'yyyyMMdd-HHmmss'))
 & $adb -s $device pull $snapshotPath $snapshotLocal
-node poll-live.mjs 1 after-history-snapshot.jsonl
+node investigation/scripts/poll-live.mjs 1 after-history-snapshot.jsonl
 ```
 
 Use `$snapshotLocal/treadmill` as the database path in the export example. This snapshot helper was written for this guide and has not been executed. It assumes the vendor app is the database writer and copying finishes within the bounded suspension window; a long-running production sync should use SQLite's backup API.
@@ -222,7 +222,7 @@ Save this as `export-history.mjs`, then run `node export-history.mjs`:
 ```javascript
 import {DatabaseSync} from 'node:sqlite';
 import {writeFileSync} from 'node:fs';
-const db = new DatabaseSync('console-databases/treadmill', {readOnly:true});
+const db = new DatabaseSync('investigation/history/console-databases/treadmill', {readOnly:true});
 const records = db.prepare(`
   SELECT recordId,userId,mode,distance,calories,duration,created
   FROM records ORDER BY recordId
@@ -252,7 +252,7 @@ All routes ultimately reach the same motor controller. Verify the resulting stat
 
 ### A. Clicking the app screen
 
-The observed running-screen layout is **1024 × 600**. The stored references are `control-before.png`, `control-after.png`, and `speed-selector.png`.
+The observed running-screen layout is **1024 × 600**. The stored references are `investigation/screenshots/control-before.png`, `investigation/screenshots/control-after.png`, and `investigation/screenshots/speed-selector.png`.
 
 ```powershell
 # Obtain a current screenshot without piping binary PNG through PowerShell.
@@ -265,7 +265,7 @@ The observed running-screen layout is **1024 × 600**. The stored references are
 Start-Sleep -Milliseconds 300
 # Select "1" in the shortcut popup (top-left entry).
 & $adb -s $device shell -T input tap 357 193
-node poll-live.mjs 3 after-ui-speed.jsonl
+node investigation/scripts/poll-live.mjs 3 after-ui-speed.jsonl
 ```
 
 Observed screen coordinates: incline down `(80,485)`, incline shortcuts `(228,485)`, incline up `(282,485)`, Stop `(456,485)`, Resume `(568,485)` in the paused screenshot, speed down `(742,485)`, speed shortcuts `(796,485)`, speed up `(944,485)`. Only speed shortcut selection was executed through this route. Inspect the current screen before reusing coordinates: overlays, page, resolution, and paused/running labels can change. Do not blindly click Resume/Stop at historical coordinates.
@@ -278,8 +278,8 @@ There was no established exported HTTP/Bluetooth/Binder API. The verified interf
 
 ```powershell
 # Ensure CURRENT PID forwarding, with no other JDWP reader active.
-node direct-speed-command.mjs 1.5
-node direct-incline-command.mjs 1
+node investigation/scripts/direct-speed-command.mjs 1.5
+node investigation/scripts/direct-incline-command.mjs 1
 ```
 
 Existing CLI guards: speed 1.0–2.0 km/h in 0.1 increments; incline integer 0 or 1; metric units; Paused/status 7 before invocation and during six readbacks. These are experiment limits, not established hardware limits. Each command writes `direct-<setting>-command-result.json` and appends to `direct-<setting>-command-audit.jsonl`.
@@ -290,11 +290,11 @@ Existing CLI guards: speed 1.0–2.0 km/h in 0.1 increments; incline integer 0 o
 | `setIncline(I)V` | Integer raw incline: 1 | Invoked; user confirmed physical movement |
 | `start()V`, `resume()V`, `pause()V`, `stop()V` | None | Found in code; not invoked through the JDWP test CLI |
 
-`setSpeed` delegates to `BaseRunner.setValue(newSpeed, existingIncline)`; `setIncline` retains the existing speed. App setters clamp to configured bounds and post a setting frame. They do not issue start/resume. `AbsRunnerService.pause()` checks that state is Running before delegating. See `control-disassembly.txt` for exact service state guards and start/resume lifecycle logic.
+`setSpeed` delegates to `BaseRunner.setValue(newSpeed, existingIncline)`; `setIncline` retains the existing speed. App setters clamp to configured bounds and post a setting frame. They do not issue start/resume. `AbsRunnerService.pause()` checks that state is Running before delegating. See `investigation/app/control-disassembly.txt` for exact service state guards and start/resume lifecycle logic.
 
 #### Invocation mechanics needed for extending the prototype
 
-`direct-setting-command.mjs` contains the working implementation:
+`investigation/scripts/direct-setting-command.mjs` contains the working implementation:
 
 1. Resolve service instance, inherited runner, metric enum, and current fields; require Paused.
 2. Resolve the setter's runtime class/method IDs. Do not hard-code debugger IDs.
@@ -369,7 +369,7 @@ Login byte behavior when logged out and controller startup/configuration packets
 | 12 | Error code | 0 observed; individual code meanings unresolved |
 | 13 | Input code | 0 observed; event meanings unresolved |
 
-Example: `FD01700F0100BF000700140000005BFE` → Paused, speed 1.5 km/h, incline 1, 191 seconds, 0.07 km, 2 kcal, pulse/error/input 0. Validate frame type, markers, and checksum before accepting a sample. `decode-serial.mjs` scans/resynchronizes captured bytes and performs these checks. The 16-bit counters have finite ranges; overflow/reset behavior was not tested.
+Example: `FD01700F0100BF000700140000005BFE` → Paused, speed 1.5 km/h, incline 1, 191 seconds, 0.07 km, 2 kcal, pulse/error/input 0. Validate frame type, markers, and checksum before accepting a sample. `investigation/scripts/decode-serial.mjs` scans/resynchronizes captured bytes and performs these checks. The 16-bit counters have finite ranges; overflow/reset behavior was not tested.
 
 #### Create and send an exact packet (PowerShell 7)
 
@@ -381,10 +381,10 @@ Example: `FD01700F0100BF000700140000005BFE` → Paused, speed 1.5 km/h, incline 
 )
 & $adb -s $device push setting.bin /data/local/tmp/treadmill-setting.bin
 & $adb -s $device shell -T 'cat /data/local/tmp/treadmill-setting.bin > /dev/ttyAS2'
-node poll-live.mjs 3 setting-readback.jsonl
+node investigation/scripts/poll-live.mjs 3 setting-readback.jsonl
 ```
 
-Use binary files, not `echo` of hex text. In our independent speed experiment, the app was briefly suspended and a separate UART reader captured baseline and new-setting replies; see `standalone-serial-speed.sh`. During verified start/pause tests, the vendor app stayed running and kept its normal polling/reading while root shell commands wrote single key packets. Coexisting writers worked in those tests but are not a validated persistent multi-client design.
+Use binary files, not `echo` of hex text. In our independent speed experiment, the app was briefly suspended and a separate UART reader captured baseline and new-setting replies; see `investigation/scripts/standalone-serial-speed.sh`. During verified start/pause tests, the vendor app stayed running and kept its normal polling/reading while root shell commands wrote single key packets. Coexisting writers worked in those tests but are not a validated persistent multi-client design.
 
 #### General frame construction example (Node.js)
 
@@ -414,21 +414,21 @@ Byte range validation is not a physical speed/incline limit. Raw commands bypass
 Prepare a paused machine, confirm metric units/speed/incline with a fresh telemetry read, and upload the existing start/pause binaries. A movement command should have an on-console pause timer armed before sending Start, so laptop disconnection does not remove the scheduled pause.
 
 ```powershell
-& $adb -s $device push serial-start-command.bin /data/local/tmp/treadmill-start.bin
-& $adb -s $device push serial-pause-command.bin /data/local/tmp/treadmill-pause.bin
-& $adb -s $device push start-cycle.sh /data/local/tmp/start-cycle.sh
+& $adb -s $device push investigation/serial/serial-start-command.bin /data/local/tmp/treadmill-start.bin
+& $adb -s $device push investigation/serial/serial-pause-command.bin /data/local/tmp/treadmill-pause.bin
+& $adb -s $device push investigation/scripts/start-cycle.sh /data/local/tmp/start-cycle.sh
 
 # Arms a 45-second fallback pause, then sends Start. It does not set speed/incline.
 & $adb -s $device shell -T sh /data/local/tmp/start-cycle.sh
 # Watch Ready -> Running; count an intended run interval from Running, not Ready.
-node poll-live.mjs 3 running-check.jsonl
+node investigation/scripts/poll-live.mjs 3 running-check.jsonl
 
 # Sends Pause immediately, then verify Pausing -> Paused.
 & $adb -s $device shell -T 'cat /data/local/tmp/treadmill-pause.bin > /dev/ttyAS2'
-node poll-live.mjs 5 pause-check.jsonl
+node investigation/scripts/poll-live.mjs 5 pause-check.jsonl
 ```
 
-`pause-cycle.sh` schedules Pause 30 seconds after that script is launched, not after hardware enters Running. `pulse-test-cycle.sh` arms a 90-second fallback and sends Start. These are diagnostic scripts, not a state-aware scheduler. The requested 30-second run added 33 seconds to the counter, including command timing/deceleration. Do not treat a timer or ADB exit code as confirmation of Paused; verify controller status 7.
+`investigation/scripts/pause-cycle.sh` schedules Pause 30 seconds after that script is launched, not after hardware enters Running. `investigation/scripts/pulse-test-cycle.sh` arms a 90-second fallback and sends Start. These are diagnostic scripts, not a state-aware scheduler. The requested 30-second run added 33 seconds to the counter, including command timing/deceleration. Do not treat a timer or ADB exit code as confirmation of Paused; verify controller status 7.
 
 For a precise future cycle, continuously monitor state in one bridge, record the first Running timestamp, schedule Pause relative to it, and verify the resulting Paused state. Keep an independent maximum-duration timer on the console.
 
@@ -442,27 +442,27 @@ The external app therefore needs a bridge on the Android console (or separately 
 
 | File | Purpose |
 | --- | --- |
-| `jdwp-read.mjs` | Node JDWP client; metadata/value-read allowlist and clean detach |
-| `poll-live.mjs` | Live session + pulse JSONL capture |
-| `direct-setting-command.mjs` | Guarded JDWP setter invocation implementation |
-| `direct-speed-command.mjs`, `direct-incline-command.mjs` | Setter CLI wrappers |
-| `inspect-serial-buffers.mjs` | Read app serial buffers and validate idle poll |
-| `standalone-serial-probe.ps1`, `.sh` | Bounded independent paused UART capture |
-| `standalone-serial-speed.sh` | Exact guarded raw speed-setting experiment |
-| `decode-serial.mjs` | Validated 16-byte reply decoder |
-| `start-cycle.sh`, `pause-cycle.sh`, `pulse-test-cycle.sh` | Timed movement experiment helpers |
-| `console-databases/`, `workout-history-raw.json`, `workout-history.csv` | Original history snapshot/exports |
-| `snapshot-history.sh` | New bounded DB/WAL copy helper; not executed |
-| `moving-telemetry.jsonl`, `telemetry-validation.json` | Initial changing telemetry evidence |
+| `investigation/scripts/jdwp-read.mjs` | Node JDWP client; metadata/value-read allowlist and clean detach |
+| `investigation/scripts/poll-live.mjs` | Live session + pulse JSONL capture |
+| `investigation/scripts/direct-setting-command.mjs` | Guarded JDWP setter invocation implementation |
+| `investigation/scripts/direct-speed-command.mjs`, `investigation/scripts/direct-incline-command.mjs` | Setter CLI wrappers |
+| `investigation/scripts/inspect-serial-buffers.mjs` | Read app serial buffers and validate idle poll |
+| `investigation/scripts/standalone-serial-probe.ps1`, `.sh` | Bounded independent paused UART capture |
+| `investigation/scripts/standalone-serial-speed.sh` | Exact guarded raw speed-setting experiment |
+| `investigation/scripts/decode-serial.mjs` | Validated 16-byte reply decoder |
+| `investigation/scripts/start-cycle.sh`, `investigation/scripts/pause-cycle.sh`, `investigation/scripts/pulse-test-cycle.sh` | Timed movement experiment helpers |
+| `investigation/history/console-databases/`, `investigation/history/workout-history-raw.json`, `investigation/history/workout-history.csv` | Original history snapshot/exports |
+| `investigation/scripts/snapshot-history.sh` | New bounded DB/WAL copy helper; not executed |
+| `investigation/telemetry/moving-telemetry.jsonl`, `investigation/telemetry/telemetry-validation.json` | Initial changing telemetry evidence |
 | `direct-*-command-result.json`, `direct-*-command-audit.jsonl` | Setter readbacks and audits |
-| `serial-standalone-capture.bin`, `serial-decoded.json` | Independent idle UART replies |
-| `serial-speed-capture.bin`, `serial-speed-decoded.json` | Raw setting accepted by controller |
-| `start-cycle-running.jsonl`, `start-pause-cycle.jsonl` | Raw start/pause state transitions |
-| `pulse-sensor-test.jsonl` | 90 live samples; pulse sensor response and return to zero |
-| `control-disassembly.txt` | Decoded app methods/protocol implementation |
-| `treadmill-console.apk`, `classes.dex`, `classes2.dex` | Preserved firmware/app evidence |
-| `hardware-protocol.md` | Focused packet reference and experiment notes |
-| `investigation.md` | Chronological investigation log; early entries describe earlier knowledge |
+| `investigation/serial/serial-standalone-capture.bin`, `investigation/serial/serial-decoded.json` | Independent idle UART replies |
+| `investigation/serial/serial-speed-capture.bin`, `investigation/serial/serial-speed-decoded.json` | Raw setting accepted by controller |
+| `investigation/telemetry/start-cycle-running.jsonl`, `investigation/telemetry/start-pause-cycle.jsonl` | Raw start/pause state transitions |
+| `investigation/telemetry/pulse-sensor-test.jsonl` | 90 live samples; pulse sensor response and return to zero |
+| `investigation/app/control-disassembly.txt` | Decoded app methods/protocol implementation |
+| `investigation/app/treadmill-console.apk`, `investigation/app/classes.dex`, `investigation/app/classes2.dex` | Preserved firmware/app evidence |
+| `docs/hardware-protocol.md` | Focused packet reference and experiment notes |
+| `docs/investigation.md` | Chronological investigation log; early entries describe earlier knowledge |
 
 ## 7. Session reset and countdown (additional code discovery)
 
@@ -480,11 +480,11 @@ Calling `BaseRunner.reset()` or editing fields alone only clears app state and d
 
 Next sent the decoded normal-mode initialization frame `FD0304000000000000000000010008FE` (type 03, mode 04, login 1, key 0). Four readbacks still showed Normal, zero distance/speed/incline, and retained time/calories. Therefore **Stop ends/saves the workout but is not a verified immediate reset of all controller counters**. Reset-on-next-start remains untested; no new start was sent during this experiment. Do not advertise a full reset command based on these results.
 
-Artifacts: `serial-stop-command.bin`, `serial-normal-mode-command.bin`, `before-stop-reset.jsonl`, `after-stop-reset.jsonl`, `after-normal-mode-reset.jsonl`, `stop-reset-screen.png`, `stop-reset-databases/`. For an external app, a fresh local session can use a captured baseline and subtract its elapsed/distance/calorie counters while accounting for hardware resets; that does not change the treadmill's counters.
+Artifacts: `investigation/serial/serial-stop-command.bin`, `investigation/serial/serial-normal-mode-command.bin`, `investigation/telemetry/before-stop-reset.jsonl`, `investigation/telemetry/after-stop-reset.jsonl`, `investigation/telemetry/after-normal-mode-reset.jsonl`, `investigation/screenshots/stop-reset-screen.png`, `investigation/history/stop-reset-databases/`. For an external app, a fresh local session can use a captured baseline and subtract its elapsed/distance/calorie counters while accounting for hardware resets; that does not change the treadmill's counters.
 
-At the user's request, repeated Stop followed one second later by normal-mode initialization at 20:01 UTC. Four samples in `repeated-stop-reset.jsonl` still reported Normal, distance 0, elapsed 267 seconds, calories 3. Repeating the sequence did not clear retained time/calories. The user's normal workaround is starting and immediately stopping; that cycle has not been tested for reset through this interface.
+At the user's request, repeated Stop followed one second later by normal-mode initialization at 20:01 UTC. Four samples in `investigation/telemetry/repeated-stop-reset.jsonl` still reported Normal, distance 0, elapsed 267 seconds, calories 3. Repeating the sequence did not clear retained time/calories. The user's normal workaround is starting and immediately stopping; that cycle has not been tested for reset through this interface.
 
-**Full counter reset subsequently verified at 20:03 UTC:** At the user's explicit request, `start-stop-reset.sh` sent Start, waited 0.3 seconds, and sent Stop (plus cleanup Stop), with an independent additional Stop scheduled after five seconds. The early Stop did not prevent Ready/countdown progressing to Running. Telemetry briefly showed Running at 1 km/h, incline 0, then Stopping and Normal when the fallback Stop was delivered. All counters became zero: elapsed 0, distance 0, calories 0, speed 0, incline 0. Raw reply `FD0100000000000000000000000001FE` independently confirmed zero counters and Normal/status 0. Capture: `after-start-stop-reset.jsonl`. This validates **start then stop after reaching Running**, not a guaranteed motion-free reset; the treadmill ran briefly. For future implementation, wait for Running then promptly Stop, keeping an independent fallback Stop. Stop during Ready/countdown was ineffective in this experiment.
+**Full counter reset subsequently verified at 20:03 UTC:** At the user's explicit request, `investigation/scripts/start-stop-reset.sh` sent Start, waited 0.3 seconds, and sent Stop (plus cleanup Stop), with an independent additional Stop scheduled after five seconds. The early Stop did not prevent Ready/countdown progressing to Running. Telemetry briefly showed Running at 1 km/h, incline 0, then Stopping and Normal when the fallback Stop was delivered. All counters became zero: elapsed 0, distance 0, calories 0, speed 0, incline 0. Raw reply `FD0100000000000000000000000001FE` independently confirmed zero counters and Normal/status 0. Capture: `investigation/telemetry/after-start-stop-reset.jsonl`. This validates **start then stop after reaching Running**, not a guaranteed motion-free reset; the treadmill ran briefly. For future implementation, wait for Running then promptly Stop, keeping an independent fallback Stop. Stop during Ready/countdown was ineffective in this experiment.
 
 ### Countdown workouts
 
@@ -494,17 +494,17 @@ For a countdown display in an external app, keep recording elapsed time and calc
 
 There is also a decoded UART time-goal setter: frame type byte 1 = `03`, byte 2 = `01`, target seconds as big endian bytes 5–6, login retained at 12, key zero. `SerialComm$ValueTask.setCountdownTime` takes integer minutes and multiplies by 60 before encoding. This path is not hardware-tested; do not assume the existing type-01 reply decoder describes all mode-03 behavior.
 
-Evidence: `reset-countdown-disassembly.txt`, including `Mode`, `CountdownRunner`, and the existing service/protocol methods.
+Evidence: `investigation/app/reset-countdown-disassembly.txt`, including `Mode`, `CountdownRunner`, and the existing service/protocol methods.
 
 ### Isolated reset experiment: no prior Stop or manual-mode initialization
 
-On 2026-10-10, ran a fresh session at 1 km/h, incline 0, then paused. Intended duration was one minute; debugger reconnection/timer delays resulted in **87 seconds**, 0.02 km, 1 kcal. Independent baseline capture `isolated-reset-baseline.bin` contained 13 valid identical Paused replies with those counters. No Stop or manual-mode initialization was sent during this fresh session before the reset experiment.
+On 2026-10-10, ran a fresh session at 1 km/h, incline 0, then paused. Intended duration was one minute; debugger reconnection/timer delays resulted in **87 seconds**, 0.02 km, 1 kcal. Independent baseline capture `investigation/serial/isolated-reset-baseline.bin` contained 13 valid identical Paused replies with those counters. No Stop or manual-mode initialization was sent during this fresh session before the reset experiment.
 
-Then `isolated-start-stop-reset.sh` sent Resume, waited four seconds for countdown to finish, and sent Stop, with cleanup Stop and a seven-second fallback Stop. Independent after-capture `isolated-reset-after.bin` contained 14 valid Normal replies with **time 0, distance 0, calories 0, speed 0, incline 0**. Decoded captures: `isolated-reset-baseline.json` and `isolated-reset-after.json`.
+Then `investigation/scripts/isolated-start-stop-reset.sh` sent Resume, waited four seconds for countdown to finish, and sent Stop, with cleanup Stop and a seven-second fallback Stop. Independent after-capture `investigation/serial/isolated-reset-after.bin` contained 14 valid Normal replies with **time 0, distance 0, calories 0, speed 0, incline 0**. Decoded captures: `investigation/telemetry/isolated-reset-baseline.json` and `investigation/telemetry/isolated-reset-after.json`.
 
 This establishes that **resuming the paused workout and stopping after countdown can clear all counters without the earlier Stop/manual-mode initialization sequence** on this firmware. It does not prove a single Stop while paused clears them, nor a motion-free reset. Fixed countdown waits are diagnostic; a production bridge should detect Running then Stop promptly and verify Normal/zero counters.
 
-History snapshot `isolated-reset-history/` confirmed new record 555: mode 0, user 3, duration 89000 ms, distance 0.02 km, calories 1 (the resume/stop added about two seconds). A stalled debugger reader was terminated and local forwarding removed afterward; recreate forwarding before the next JDWP read.
+History snapshot `investigation/history/isolated-reset-history/` confirmed new record 555: mode 0, user 3, duration 89000 ms, distance 0.02 km, calories 1 (the resume/stop added about two seconds). A stalled debugger reader was terminated and local forwarding removed afterward; recreate forwarding before the next JDWP read.
 
 ## 8. Established scope and remaining unknowns
 

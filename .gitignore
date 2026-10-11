@@ -2,5 +2,8 @@
 !/.gitignore
 !/dashboard/
 !/docs/
-!/TREADMILL-INTEGRATION-GUIDE.md
-!/hardware-protocol.md
+!/README.md
+!/investigation/
+/investigation/*
+!/investigation/README.md
+!/investigation/scripts/

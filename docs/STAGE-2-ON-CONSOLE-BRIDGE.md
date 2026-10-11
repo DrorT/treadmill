@@ -26,7 +26,7 @@ Why this choice: no permanent second UART reader, no serial takeover, no guessed
 - Ultimate Fitness/Premium G700X; model K10.1FHD-N-ENS-AC; Allwinner A133 Android 11.
 - Build RP1A.201005.006 test-keys; app firmware v1.5.5-yjnp, package `com.bodi.treadmill`, versionCode57.
 - Root ADB works; IP/connection port/PID vary. Historical IP 192.168.10.18, PID1218 are not configuration constants.
-- APK preserved as `treadmill-console.apk`; disassembly `control-disassembly.txt` and `reset-countdown-disassembly.txt`.
+- APK preserved as `investigation/app/treadmill-console.apk`; disassembly `investigation/app/control-disassembly.txt` and `investigation/app/reset-countdown-disassembly.txt`.
 - Active service `com.bodi.treadmill.service.RunnerService`, inherited `AbsRunnerService.mRunner`.
 - Runner `NormalRunner`/`BaseRunner`; fields speed integer tenths, incline integer, duration ms, distance km float, calories kcal float, laps, State enum, status integer.
 - `SerialComm.mUnit` is METRIC in observed sessions; `CommandHandler.mPulse` bpm (0 unavailable).

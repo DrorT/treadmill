@@ -77,28 +77,28 @@ This requests speed 1.0 km/h and retains incline 1. The key-code byte at offset 
 
 The independent capture contained 13 valid replies: the first two reported speed 1.5, and the next eleven reported speed 1.0. Every reply reported Paused/status 7, incline 1, time 191 seconds, distance 0.07 km, and error 0. All checksums passed. Three subsequent app reads confirmed the new setting and unchanged paused session.
 
-Artifacts: standalone-serial-speed.sh, serial-speed-command.bin, serial-speed-capture.bin, serial-speed-decoded.json, before-raw-speed.jsonl, after-raw-speed.jsonl. The shell accepts only the exact tested packet; no generic arbitrary-command interface is exposed.
+Artifacts: investigation/scripts/standalone-serial-speed.sh, investigation/serial/serial-speed-command.bin, investigation/serial/serial-speed-capture.bin, investigation/serial/serial-speed-decoded.json, investigation/telemetry/before-raw-speed.jsonl, after-raw-speed.jsonl. The shell accepts only the exact tested packet; no generic arbitrary-command interface is exposed.
 
 ## Reproducible paused probe
 
-Run `standalone-serial-probe.ps1` from this workspace with the current ADB device address and app PID if they change.
+Run `investigation/scripts/standalone-serial-probe.ps1` from this workspace with the current ADB device address and app PID if they change.
 
 The wrapper confirms Paused/status 7, exports a validated idle frame, pushes the probe, captures replies, and checks the restored app. The on-device script sends ten idle polls at 200 ms intervals while independently reading the UART for 2.5 seconds. A cleanup trap and a four-second restoration watchdog resume the app.
 
 Artifacts:
 
-- `serial-buffer-snapshot.json`: app buffer snapshot and validated poll bytes.
-- `serial-standalone-capture.bin`: 208 captured bytes.
-- `serial-decoded.json`: 13 valid independently captured replies; all checksums passed.
-- `decode-serial.mjs`: standalone frame decoder.
-- `standalone-serial-probe.sh`: bounded on-device probe.
-- `before-serial-probe.jsonl` and `after-serial-probe.jsonl`: app telemetry around the probe.
+- `investigation/serial/serial-buffer-snapshot.json`: app buffer snapshot and validated poll bytes.
+- `investigation/serial/serial-standalone-capture.bin`: 208 captured bytes.
+- `investigation/serial/serial-decoded.json`: 13 valid independently captured replies; all checksums passed.
+- `investigation/scripts/decode-serial.mjs`: standalone frame decoder.
+- `investigation/scripts/standalone-serial-probe.sh`: bounded on-device probe.
+- `investigation/telemetry/before-serial-probe.jsonl` and `investigation/telemetry/after-serial-probe.jsonl`: app telemetry around the probe.
 
 For an ongoing bridge, coordinate UART ownership and polling with the vendor app. The short SIGSTOP handoff is a diagnostic technique, not an ongoing control architecture.
 
 ## Pulse sensor test: verified
 
-On 2026-10-10, started through the raw UART at 1 km/h, incline 1. Read the controller-derived pulse via `CommandHandler.mPulse`, updated by the serial receive callback. Nonzero samples ranged from 73 to 82 bpm; moving samples ranged from 73 to 81. After a raw pause, state was Paused with duration 267 seconds and distance 0.09 km. Pulse returned to zero at 19:43:57 UTC; contact-loss timing was not independently confirmed. Capture: `pulse-sensor-test.jsonl`. `poll-live.mjs` now includes `pulseRaw`. This validates availability of the sensor reading, not its measurement accuracy.
+On 2026-10-10, started through the raw UART at 1 km/h, incline 1. Read the controller-derived pulse via `CommandHandler.mPulse`, updated by the serial receive callback. Nonzero samples ranged from 73 to 82 bpm; moving samples ranged from 73 to 81. After a raw pause, state was Paused with duration 267 seconds and distance 0.09 km. Pulse returned to zero at 19:43:57 UTC; contact-loss timing was not independently confirmed. Capture: `investigation/telemetry/pulse-sensor-test.jsonl`. `investigation/scripts/poll-live.mjs` now includes `pulseRaw`. This validates availability of the sensor reading, not its measurement accuracy.
 # Start and pause cycle, 2026-10-10
 
-Sent raw UART start `fd0100000000000000000000014749fe` (key 0x47), with the console app continuing its normal polling. Telemetry changed Paused -> Ready -> Running at 19:37:41 UTC, speed 1 km/h, incline 1. Sent raw pause `fd0100000000000000000000015c5efe` (key 0x5c) after about 30 seconds; telemetry changed Pausing -> Paused by 19:38:15 UTC. Workout elapsed time rose from 191 to 224 seconds, distance from 0.07 to 0.08 km. Captures: `start-cycle-running.jsonl` and `start-pause-cycle.jsonl`. A device-side fallback pause was armed before start; the treadmill was confirmed paused. Timing included command delivery and deceleration (33 seconds added to the workout counter).
+Sent raw UART start `fd0100000000000000000000014749fe` (key 0x47), with the console app continuing its normal polling. Telemetry changed Paused -> Ready -> Running at 19:37:41 UTC, speed 1 km/h, incline 1. Sent raw pause `fd0100000000000000000000015c5efe` (key 0x5c) after about 30 seconds; telemetry changed Pausing -> Paused by 19:38:15 UTC. Workout elapsed time rose from 191 to 224 seconds, distance from 0.07 to 0.08 km. Captures: `investigation/telemetry/start-cycle-running.jsonl` and `investigation/telemetry/start-pause-cycle.jsonl`. A device-side fallback pause was armed before start; the treadmill was confirmed paused. Timing included command delivery and deceleration (33 seconds added to the workout counter).
